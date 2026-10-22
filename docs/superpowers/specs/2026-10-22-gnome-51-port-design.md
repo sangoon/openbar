@@ -1,0 +1,239 @@
+# Design: port Open Bar to GNOME Shell 50 and 51
+
+Date: 2026-10-22
+Status: accepted
+Scope: `openbar@neuromorph`, fork `sangoon/openbar`
+
+## Context
+
+### Goal
+
+Make Open Bar load and work on GNOME Shell 51, keeping the fork maintainable
+across future Shell releases, and offer the work back upstream.
+
+### Target platform
+
+Verified on the maintainer's workstation (CachyOS, Wayland):
+
+| Component | Version |
+|---|---|
+| GNOME Shell | 51.1 |
+| Mutter | 51.1 |
+| GJS | 1.90.1 |
+| GTK | 4.24.1 |
+| libadwaita | 1.10 |
+
+### Starting state
+
+`main` is `01fb242` (2025-10-05), identical to upstream `neuromorph/openbar`.
+Upstream has published nothing since; extensions.gnome.org advertises shell
+versions 42 through 49 only. No GNOME 50 or 51 support exists anywhere.
+
+`metadata.json` on `main` declares `version: 42` and
+`shell-version: ["45","46","47","48","49"]`.
+
+The copy installed at `~/.local/share/gnome-shell/extensions/openbar@neuromorph`
+is **version 49**, obtained from extensions.gnome.org. It is therefore *newer*
+than `main`. The only code difference between the two is four lines in
+`extension.js`, described under "Defect 1" below: upstream shipped that fix on
+extensions.gnome.org and never pushed it to git.
+
+The repository has no `docs/`, no `CLAUDE.md`, no linter, no CI and no tests.
+
+### Licence
+
+Every source file carries `SPDX-License-Identifier: GPL-2.0-or-later`;
+`LICENSE` holds the GPLv3 text. Forking, modifying and redistributing are
+permitted provided the licence and the existing copyright notices are kept and
+modifications are stated. Nothing else constrains this work.
+
+## Decisions to confirm
+
+| Decision | Chosen | Alternative considered |
+|---|---|---|
+| Defect 3 fix shape | Capability detection (`section._list ?? section`), works on 45 through 51 with no version gate | A `gnomeVersion >= 49` branch, more explicit but one more branch to revisit every release |
+| DateMenu traversal | Keep upstream's index walking, wrap it in `try/catch` | Rewrite it to search by `style_class`; removes the defect class rather than the instance, but rewrites working code and is hard to land upstream |
+| Lint reach | `npm run lint` over the whole repository, with the initial error count recorded in `docs/development/linting.md` as a baseline and a "no new errors" rule | Lint only touched files: greener, but does not describe the real state |
+| Worktree location | `.claude/worktrees/<branch>`, added to `.gitignore` | A path outside the repository |
+| Upstream contribution | Two separate pull requests to `neuromorph/openbar`: the v49 fix first, GNOME 51 support second | One all-or-nothing pull request |
+| Branch | `feat/main/gnome-51-support` | — |
+
+## Compatibility assessment
+
+Every point of contact between the extension and the Shell was checked against
+the GNOME Shell 51.1 sources, and diffed against 49.0 to separate real
+regressions from pre-existing breakage.
+
+### What still holds
+
+- **Imports.** All seven `gi://` imports and all six
+  `resource:///org/gnome/shell/` imports resolve. The exports the extension
+  relies on are unchanged: `PanelMenu.Button`, `PanelMenu.ButtonBox`,
+  `Calendar.Calendar`, `LayoutManager.LayoutManager`, `Config.PACKAGE_VERSION`.
+  `main.js` and `layout.js` only gained exports between 49.0 and 51.1.
+- **GI symbols.** The 48 distinct `St.*`, `Clutter.*`, `Meta.*`, `Gtk.*`,
+  `Adw.*`, `Gdk*` and `Pango.*` symbols the sources reference all resolve
+  against the installed typelibs.
+- **Shell internals.** Every private member the extension reaches into is still
+  present in 51.1: `Panel._leftBox` / `_centerBox` / `_rightBox`
+  (`panel.js:474-479`), `MessageTray._bannerBin` and `_banner`
+  (`messageTray.js:745,762`), `LayoutManager._bgManagers` (`layout.js:323`),
+  `DateMenuButton._calendar`, `QuickSettingsMenu._boxPointer` and `_grid`, and
+  `Calendar.prototype._rebuildCalendar` (`calendar.js:629`), which the extension
+  monkey-patches.
+- **Theme class names.** Diffing the selector set of `data/theme` between 49.0
+  and 51.1 shows one removal, `.login-dialog-auth-list-label`, which the
+  extension does not use. There is no theming regression from 49 to 51.
+- **External GSettings.** All eight keys read or written
+  (`org.gnome.desktop.interface` `color-scheme`, `accent-color`, `gtk-theme`,
+  `icon-theme`; `org.gnome.desktop.background` `picture-uri`,
+  `picture-uri-dark`; `org.gnome.desktop.a11y.interface` `high-contrast`;
+  `org.gnome.shell` `enabled-extensions`) exist.
+- **Own schema.** `glib-compile-schemas --strict` accepts
+  `schemas/org.gnome.shell.extensions.openbar.gschema.xml`.
+- **Version gating.** Existing gates are all `>=` or `<` comparisons
+  (`gnomeVersion >= 47`, `< 48`, `< 49`), so 50 and 51 fall into the newest
+  branch with no new code.
+
+The only change required to make the extension load is the `shell-version`
+array.
+
+### Defects to fix
+
+Each of these predates GNOME 51; all three affect it.
+
+**Defect 1 — `clearBtn` is block-scoped and read out of scope.**
+In `extension.js` on `main`, `clearBtn` is declared `const` inside both arms of
+an `if`/`else` and read after both arms close. `applyMenuStyles` is called from
+`enable()` with no `try/catch`, and the DateMenu branch runs unconditionally
+because the date menu is always in the centre box. `main` therefore throws a
+`ReferenceError` during `enable()` and the extension fails to activate on
+*every* Shell version, not only 51. The v49 payload on extensions.gnome.org
+fixes it by hoisting `let clearBtn;` above the `if`.
+
+**Defect 2 — wrong child index for the Clear button.**
+For `gnomeVersion >= 49` the code reads `msgHbox.get_child_at_index(1)`. In
+`calendar.js` of both 49.0 and 51.1, the `message-list-controls` box receives
+exactly one child, `_clearButton`, at index 0. The call returns `null`;
+`applyMenuClass` filters null, so nothing throws, but the Clear button is never
+themed.
+
+**Defect 3 — `section._list` no longer exists.**
+`applySectionStyles` assumes the pre-49 structure where the message list held
+`NotificationSection` and `MediaSection` objects, each exposing `_list`. Since
+49, `MessageView` is an `St.Viewport` holding message actors directly. The
+optional chaining keeps it from throwing, so the failure is silent:
+notifications never receive the `openmenu` class.
+
+### Known debt left out of scope
+
+`prefs.js` uses six widgets deprecated since GTK 4.10: `Gtk.ColorButton`,
+`Gtk.ComboBoxText`, `Gtk.FontButton`, `Gtk.FileChooserDialog`,
+`Gtk.MessageDialog` and `Gtk.StyleContext`. All six are still present in GTK
+4.24.1, so preferences work, with console warnings. Replacing them is an
+interface rewrite over roughly 3000 lines and does not belong in a
+compatibility port. It will break at GTK 5.
+
+`stylesheets.js` (3878 lines), `prefs.js` (3024 lines) and `extension.js` (1664
+lines) all exceed the thousand-line guideline, and the sources are heavily
+commented. Per the opportunistic-migration rule, only code this port touches is
+brought into line; the rest stays as upstream wrote it and is recorded as
+pending migration in the local `CLAUDE.md`.
+
+## Implementation
+
+### Commit 1 — restore the fix upstream shipped but never pushed
+
+`fix: restore clearBtn scope fix shipped in v49`
+
+Import the v49 payload from extensions.gnome.org. The effective diff is the
+hoisting of `let clearBtn;` above the `if`/`else`. Kept as its own commit so it
+can be offered upstream, accepted, or reverted independently of the port.
+
+### Commit 2 — GNOME 50 and 51 support
+
+`feat: support GNOME 50 and 51`
+
+- `metadata.json`: `shell-version` becomes
+  `["45","46","47","48","49","50","51"]`; `version` becomes 50.
+- Defect 2: the Clear button index becomes 0.
+- Defect 3: `applySectionStyles` resolves its target as `section._list ?? section`,
+  so it walks `_list` on 45 through 48 and the `MessageView` itself on 49
+  onwards.
+- The `DateMenuButton` traversal is wrapped in `try/catch` that logs and
+  continues. Today any drift in Shell structure inside that block aborts
+  `enable()` and puts the extension in `ERROR`; afterwards it degrades the date
+  menu's theming and leaves the rest working. This is the general lesson of
+  Defect 1, and it is the one piece of the structure-agnostic approach worth
+  taking without rewriting the traversal.
+
+### Function extraction
+
+The DateMenu block becomes named functions, each doing one thing
+(`themeMessageList`, `themeClearButton`, `themeCalendarPane`), with the comments
+they replace moved into `docs/`. This is the code this port touches, so the
+six rules apply to it.
+
+## Verification
+
+### Harness
+
+A headless Shell, not a nested window:
+`dbus-run-session -- gnome-shell --headless --virtual-monitor 1920x1080`.
+Both options exist on the installed binary. The session is isolated from the
+maintainer's own, leaves no window on screen, and can run unattended.
+
+The extension is installed into a throwaway
+`XDG_DATA_HOME`, enabled, and three things are asserted:
+
+1. `gnome-extensions info openbar@neuromorph`, queried on the test session's
+   bus, reports state `ENABLED`.
+2. The session's journal contains no exception naming the extension.
+3. `stylesheet.css` is generated in the extension's run directory, and the
+   journal carries none of the `Openbar: Error loading stylesheet` lines the
+   extension logs when `St.Theme.load_stylesheet` throws. `St.Theme` exposes no
+   way to read back which sheets are loaded, so the absence of that log line is
+   the available evidence, not proof the sheet took effect.
+
+### Positive controls
+
+A check that has never been observed to fail proves nothing, so each assertion
+ships with the mutation that breaks it:
+
+- **`shell-version`**: run the sequence first with the array left at `[45…49]`
+  and require failure — state `OUT OF DATE`, extension not enabled. Then with
+  50 and 51 added, and require success. This proves assertion 1 is sensitive to
+  the change it is meant to verify.
+- **`try/catch`**: a probe that forces a bad index inside the DateMenu
+  traversal must produce a logged error *and* leave the extension `ENABLED`.
+  Without the `try/catch` the same probe must leave it in `ERROR`. This proves
+  the guard does something.
+- **Defect 3**: a headless session has no notifications, so a probe that finds
+  no message actor would pass vacuously. The probe therefore raises a
+  notification first, asserts that at least one message actor exists, and only
+  then asserts the `openmenu` class on it. It must fail against `main` and pass
+  after the fix.
+
+The verification procedure is written to `docs/development/testing.md` so it is
+reproducible without this document.
+
+## Deliverables
+
+- `openbar@neuromorph/metadata.json`, `openbar@neuromorph/extension.js`
+- `docs/adr/0001-port-to-gnome-51.md` — the decision, upstream's state, and how
+  compatibility was established
+- `docs/development/testing.md` — the headless verification procedure
+- `docs/development/linting.md` — how to run the linter and the baseline count
+- `CLAUDE.md` — licence constraint, upstream code pending migration, how to test
+- `eslint.config.js`, `package.json` with `npm run lint`, using
+  `eslint-config-gnome` as a git dependency from
+  `gitlab.gnome.org/World/javascript/eslint-config-gnome`; it is not published
+  on npm, which is how gnome-shell 51.1 itself consumes it
+- `.gitignore` gains `.claude/`
+- Two pull requests proposed to `neuromorph/openbar`
+
+## Review log
+
+| Date | Round | Trigger | Outcome |
+|---|---|---|---|
+| 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
