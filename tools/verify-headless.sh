@@ -112,6 +112,10 @@ fail() {
 	exit 1
 }
 
+print_js_error_excerpt() {
+	grep -A 12 'JS ERROR' "$work/shell.log" | head -40 || true
+}
+
 report() {
 	state=$(extension_field state)
 	error=$(extension_field error)
@@ -125,7 +129,7 @@ report() {
 	[ -f "$stylesheet" ] && echo "stylesheet: generated" || echo "stylesheet: absent"
 	grep -c 'Openbar: Error loading stylesheet' "$work/shell.log" |
 		sed 's/^/stylesheet load errors: /'
-	grep -E 'JS ERROR' "$work/shell.log" | head -5 || true
+	print_js_error_excerpt
 	[ "$state" = '1.0' ]
 }
 
