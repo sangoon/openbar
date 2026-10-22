@@ -237,3 +237,5 @@ reproducible without this document.
 | Date | Round | Trigger | Outcome |
 |---|---|---|---|
 | 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
+| 2026-10-22 | 2 | Self-review before handing the spec over | Two over-claims corrected: `St.Theme` exposes no way to read back loaded sheets, so assertion 3 rests on the absence of the extension's own error log; and the Defect 3 probe would pass vacuously in a headless session with no notifications, so it now raises one and asserts a message actor exists first |
+| 2026-10-22 | 3 | Spec reviewed in Plannotator | All six decisions in "Decisions to confirm" accepted as proposed, no changes requested. Table kept as the record of what was weighed |
