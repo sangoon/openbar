@@ -7,7 +7,7 @@ and opens no window.
 
     dbus-run-session -- ./tools/verify-headless.sh
 
-Exit 0 means the Shell reached state 1 `ACTIVE` with an empty error.
+Exit 0 means the Shell reached state 1 `ACTIVE` with an empty error. The harness refuses to run when `org.gnome.Shell` already has an owner on the session bus, so it cannot report on a live session.
 
 ## Options
 

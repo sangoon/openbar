@@ -29,7 +29,15 @@ while [ $# -gt 0 ]; do
 done
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+
+stop_test_shell_and_remove_scratch() {
+	if [ -n "${shell_pid:-}" ]; then
+		kill "$shell_pid" 2>/dev/null || true
+		wait "$shell_pid" 2>/dev/null || true
+	fi
+	rm -rf "$work"
+}
+trap stop_test_shell_and_remove_scratch EXIT
 
 prepare_session_dirs() {
 	XDG_DATA_HOME="$work/data"
@@ -66,7 +74,12 @@ with open(path, "w") as handle:
 
 mutate_scratch_source() {
 	[ -n "$mutate_expr" ] || return 0
-	sed -i "$mutate_expr" "$XDG_DATA_HOME/gnome-shell/extensions/$UUID/extension.js"
+	source_file="$XDG_DATA_HOME/gnome-shell/extensions/$UUID/extension.js"
+	cp "$source_file" "$work/extension.js.before"
+	sed -i "$mutate_expr" "$source_file"
+	cmp -s "$work/extension.js.before" "$source_file" &&
+		fail "mutation changed nothing: $mutate_expr"
+	return 0
 }
 
 enable_extensions() {
@@ -76,13 +89,25 @@ enable_extensions() {
 		fail 'gsettings writes are not persisting; the keyfile backend is not in effect'
 }
 
+shell_name_has_owner() {
+	gdbus call --session -d org.freedesktop.DBus -o /org/freedesktop/DBus \
+		-m org.freedesktop.DBus.NameHasOwner org.gnome.Shell
+}
+
+refuse_shared_session_bus() {
+	[ "$(shell_name_has_owner)" = '(false,)' ] ||
+		fail 'org.gnome.Shell already has an owner: run through dbus-run-session, not on a live session bus'
+}
+
 start_shell() {
+	refuse_shared_session_bus
 	WAYLAND_DISPLAY="openbar-verify-$$"
 	export WAYLAND_DISPLAY
 	gnome-shell --headless --virtual-monitor 1280x720 >"$work/shell.log" 2>&1 &
 	shell_pid=$!
 	waited=0
 	while [ "$waited" -lt 40 ]; do
+		kill -0 "$shell_pid" 2>/dev/null || fail 'the test Shell exited before answering'
 		if shell_version >/dev/null 2>&1; then return 0; fi
 		sleep 1
 		waited=$((waited + 1))
@@ -108,7 +133,6 @@ shell_eval() {
 
 fail() {
 	echo "FAIL: $1" >&2
-	[ -n "${shell_pid:-}" ] && kill "$shell_pid" 2>/dev/null
 	exit 1
 }
 
@@ -130,7 +154,7 @@ report() {
 	grep -c 'Openbar: Error loading stylesheet' "$work/shell.log" |
 		sed 's/^/stylesheet load errors: /'
 	print_js_error_excerpt
-	[ "$state" = '1.0' ]
+	[ "$state" = '1.0' ] && [ "$error" = "''" ]
 }
 
 prepare_session_dirs
@@ -141,6 +165,3 @@ enable_extensions
 start_shell
 sleep 8
 report
-status=$?
-kill "$shell_pid" 2>/dev/null
-exit "$status"
