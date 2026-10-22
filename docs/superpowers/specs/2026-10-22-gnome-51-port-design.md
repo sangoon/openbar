@@ -51,7 +51,7 @@ modifications are stated. Nothing else constrains this work.
 
 | Decision | Chosen | Alternative considered |
 |---|---|---|
-| Defect 3 fix shape | Capability detection (`section._list ?? section`), works on 45 through 51 with no version gate | A `gnomeVersion >= 49` branch, more explicit but one more branch to revisit every release |
+| Defect 3 fix shape | Capability detection on the *container* level: collect `section._list` across children, and fall back to the list itself when none has one. Works on 45 through 51 with no version gate | A `gnomeVersion >= 49` branch, more explicit but one more branch to revisit every release |
 | DateMenu traversal | Keep upstream's index walking, wrap it in `try/catch` | Rewrite it to search by `style_class`; removes the defect class rather than the instance, but rewrites working code and is hard to land upstream |
 | Lint reach | `npm run lint` over the whole repository, with the initial error count recorded in `docs/development/linting.md` as a baseline and a "no new errors" rule | Lint only touched files: greener, but does not describe the real state |
 | Worktree location | `.claude/worktrees/<branch>`, added to `.gitignore` | A path outside the repository |
@@ -118,12 +118,29 @@ exactly one child, `_clearButton`, at index 0. The call returns `null`;
 `applyMenuClass` filters null, so nothing throws, but the Clear button is never
 themed.
 
-**Defect 3 — `section._list` no longer exists.**
+**Defect 3 — the section level disappeared.**
 `applySectionStyles` assumes the pre-49 structure where the message list held
-`NotificationSection` and `MediaSection` objects, each exposing `_list`. Since
-49, `MessageView` is an `St.Viewport` holding message actors directly. The
-optional chaining keeps it from throwing, so the failure is silent:
-notifications never receive the `openmenu` class.
+`NotificationSection` and `MediaSection` objects, each exposing a `_list` whose
+children are bins wrapping a message:
+
+```
+up to 48:  sectionList -> section -> section._list -> St.Bin -> .child = Message
+since 49:  MessageView --------------------------> St.Bin -> .child = Message
+```
+
+`MessageView._addMessageAtIndex` (`messageList.js:1572-1596`) wraps each message
+in an `St.Bin` and adds it directly to the view. What vanished is not `_list`
+under each section — it is the section level itself. `MessageView` now plays
+exactly the role `section._list` used to play, so the fix belongs at the
+contract of `applySectionStyles`, not inside its loop: the argument *is* the
+message container when no child exposes `_list`.
+
+`MessageView` also holds a non-message `_overlay` child (a `Clutter.Actor` with
+no `child` property); `applyMenuClass` already returns early on a falsy
+argument, so it needs no special case.
+
+The existing optional chaining keeps the current code from throwing, so the
+failure is silent: notifications never receive the `openmenu` class.
 
 ### Known debt left out of scope
 
@@ -183,31 +200,71 @@ A headless Shell, not a nested window:
 Both options exist on the installed binary. The session is isolated from the
 maintainer's own, leaves no window on screen, and can run unattended.
 
-The extension is installed into a throwaway
-`XDG_DATA_HOME`, enabled, and three things are asserted:
+The extension is installed into a throwaway `XDG_DATA_HOME`, enabled, and three
+things are asserted:
 
-1. `gnome-extensions info openbar@neuromorph`, queried on the test session's
-   bus, reports state `ENABLED`.
-2. The session's journal contains no exception naming the extension.
-3. `stylesheet.css` is generated in the extension's run directory, and the
-   journal carries none of the `Openbar: Error loading stylesheet` lines the
-   extension logs when `St.Theme.load_stylesheet` throws. `St.Theme` exposes no
-   way to read back which sheets are loaded, so the absence of that log line is
-   the available evidence, not proof the sheet took effect.
+1. The extension reaches state `ACTIVE` with an empty `error` field.
+2. The Shell's output contains no `JS ERROR` naming the extension.
+3. `stylesheet.css` is generated under
+   `$XDG_RUNTIME_DIR/io.github.neuromorph.openbar/`, and the output carries none
+   of the `Openbar: Error loading stylesheet` lines the extension logs when
+   `St.Theme.load_stylesheet` throws. `St.Theme` exposes no way to read back
+   which sheets are loaded, so the absence of that log line is the available
+   evidence, not proof the sheet took effect.
+
+Two properties of the harness are load-bearing, and both were found by watching
+the harness report success while measuring nothing:
+
+- **`GSETTINGS_BACKEND=keyfile` is mandatory.** Under `dbus-run-session` there
+  is no activatable dconf service, so `gsettings set` fails silently:
+  `enabled-extensions` reads back as `@as []`, the extension is never enabled,
+  it sits at state `INITIALIZED`, and every assertion above passes vacuously.
+  The keyfile backend writes
+  `$XDG_CONFIG_HOME/glib-2.0/settings/keyfile` and needs no daemon.
+- **State must be read from the Shell itself**, via
+  `org.gnome.Shell.Extensions.GetExtensionInfo` on `/org/gnome/Shell`. The
+  `gnome-extensions` CLI can be answered by a standalone, D-Bus-activated
+  `org.gnome.Shell.Extensions` service that scans the disk, so it reports
+  plausible states while the Shell is dead.
+
+States are read as the numbers of `ExtensionState`
+(`misc/extensionUtils.js:15-28`): 1 `ACTIVE`, 2 `INACTIVE`, 3 `ERROR`,
+4 `OUT_OF_DATE`, 6 `INITIALIZED`.
+
+### Measured result
+
+The harness was run on GNOME Shell 51.1 against three payloads before this plan
+was written:
+
+| Payload | `state` | `error` |
+|---|---|---|
+| `main` code, `shell-version` `45-49` | 4 `OUT_OF_DATE` | — (never loaded) |
+| `main` code, `shell-version` `45-51` | 3 `ERROR` | `ReferenceError: clearBtn is not defined` |
+| v49 code, `shell-version` `45-51` | 1 `ACTIVE` | `''` |
+
+The second row carries the stack trace
+`applyMenuStyles@extension.js:396` called from `enable@extension.js:1535`,
+confirming Defect 1 empirically. The third row establishes that Open Bar runs
+on GNOME Shell 51.1 once the metadata is widened and that fix is in place, and
+that `stylesheet.css` is generated.
 
 ### Positive controls
 
 A check that has never been observed to fail proves nothing, so each assertion
 ships with the mutation that breaks it:
 
-- **`shell-version`**: run the sequence first with the array left at `[45…49]`
-  and require failure — state `OUT OF DATE`, extension not enabled. Then with
-  50 and 51 added, and require success. This proves assertion 1 is sensitive to
-  the change it is meant to verify.
+- **`shell-version`**: the array left at `45-49` must yield state 4
+  `OUT_OF_DATE`. Observed; see "Measured result" above.
+- **Defect 1**: `main`'s code with the widened array must yield state 3 `ERROR`
+  carrying `clearBtn is not defined`. Observed.
+- **`INITIALIZED` is a harness failure, not a result.** State 6 means the
+  extension was never enabled, so nothing downstream was measured. The harness
+  treats it as an error of its own rather than a failed assertion, because the
+  distinction is what the keyfile-backend bug cost.
 - **`try/catch`**: a probe that forces a bad index inside the DateMenu
-  traversal must produce a logged error *and* leave the extension `ENABLED`.
-  Without the `try/catch` the same probe must leave it in `ERROR`. This proves
-  the guard does something.
+  traversal must produce a logged error *and* leave the extension state 1
+  `ACTIVE`. Without the `try/catch` the same probe must leave it state 3
+  `ERROR`. This proves the guard does something.
 - **Defect 3**: a headless session has no notifications, so a probe that finds
   no message actor would pass vacuously. The probe therefore raises a
   notification first, asserts that at least one message actor exists, and only
@@ -239,3 +296,4 @@ reproducible without this document.
 | 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
 | 2026-10-22 | 2 | Self-review before handing the spec over | Two over-claims corrected: `St.Theme` exposes no way to read back loaded sheets, so assertion 3 rests on the absence of the extension's own error log; and the Defect 3 probe would pass vacuously in a headless session with no notifications, so it now raises one and asserts a message actor exists first |
 | 2026-10-22 | 3 | Spec reviewed in Plannotator | All six decisions in "Decisions to confirm" accepted as proposed, no changes requested. Table kept as the record of what was weighed |
+| 2026-10-22 | 4 | Harness prototyped before writing the plan, to avoid prescribing an unverified test | Three corrections. The accepted Defect 3 fix `section._list ?? section` was **wrong**: reading `MessageView._addMessageAtIndex` showed the section level disappeared, not `_list`, so that expression reached one level too deep and would have themed grandchildren. Fix moved to the container level. The harness gained two mandatory properties found by watching it report success while measuring nothing: `GSETTINGS_BACKEND=keyfile`, without which the extension never enables, and reading state from the Shell rather than the `gnome-extensions` CLI. Compatibility is now established empirically, not only by inspection: the port reaches state `ACTIVE` on 51.1 |
