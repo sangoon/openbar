@@ -6,7 +6,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint openbar@neuromorph"
+    "lint": "eslint openbar@neuromorph eslint.config.js tools/harness"
   },
   "devDependencies": {
     "@eslint/config-helpers": "^0.5.0",
