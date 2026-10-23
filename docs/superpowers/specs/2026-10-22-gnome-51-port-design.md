@@ -210,9 +210,13 @@ can be offered upstream, accepted, or reverted independently of the port.
 - `metadata.json`: `shell-version` becomes
   `["45","46","47","48","49","50","51"]`; `version` becomes 50.
 - Defect 2: the Clear button index becomes 0.
-- Defect 3: `applySectionStyles` resolves its target as `section._list ?? section`,
-  so it walks `_list` on 45 through 48 and the `MessageView` itself on 49
-  onwards.
+- Defect 3: `applySectionStyles` resolves what to theme **by style class**.
+  `messageActors()` collects every descendant of the message list carrying
+  `message`, stopping at the first match on each branch; `messageContainers()`
+  returns the actors on the way down, which `trackMessageAdditions()` connects to
+  so a notification arriving later is themed too. One shape covers 45 through 51
+  with no version gate. See "Defect 3" above for why resolving by tree position
+  cannot work here.
 - The `DateMenuButton` traversal is wrapped in `try/catch` that logs and
   continues. Today any drift in Shell structure inside that block aborts
   `enable()` and puts the extension in `ERROR`; afterwards it degrades the date
@@ -222,10 +226,14 @@ can be offered upstream, accepted, or reverted independently of the port.
 
 ### Function extraction
 
-The DateMenu block becomes named functions, each doing one thing
-(`themeMessageList`, `themeClearButton`, `themeCalendarPane`), with the comments
-they replace moved into `docs/`. This is the code this port touches, so the
-six rules apply to it.
+The DateMenu block becomes named methods, each doing one thing — `themeDateMenu`,
+`themeMessagePane`, `themeMessageControls`, `themeCalendarPane` and
+`scheduleCalendarGridStyle` — with the comments they replace moved into
+`docs/development/message-list-structure.md`. This is the code this port touches,
+so the six rules apply to it.
+
+`themeCalendarPane` uses the existing `applyBoxStyles` in place of the three
+hand-rolled nested `forEach` levels the inline block used.
 
 ## Verification
 
@@ -341,5 +349,6 @@ reproducible without this document.
 | 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
 | 2026-10-22 | 2 | Self-review before handing the spec over | Two over-claims corrected: `St.Theme` exposes no way to read back loaded sheets, so assertion 3 rests on the absence of the extension's own error log; and the Defect 3 probe would pass vacuously in a headless session with no notifications, so it now raises one and asserts a message actor exists first |
 | 2026-10-22 | 3 | Spec reviewed in Plannotator | All six decisions in "Decisions to confirm" accepted as proposed, no changes requested. Table kept as the record of what was weighed |
+| 2026-10-23 | 6 | Task 8 flagged that the Implementation section still described the superseded fix | Two stale claims the round 5 correction missed, both introduced by the controller and both found by an implementer rather than by review: Defect 3 was still written as `section._list ?? section`, and the extracted functions were named `themeMessageList`/`themeClearButton`, which match no method in the tree. Corrected to the by-style-class resolution and to the real method names. The lesson is narrower than round 5 and worth keeping: correcting a decision in one section of a document does not correct the sections that restate it |
 | 2026-10-23 | 5 | Probed the live Shell 51.1 actor tree before dispatching the Defect 3 fix | The round 4 correction was **also wrong**, and in the same direction: it moved the target up one level inside a deeper mistake. The real shape has two levels round 4 did not know about — notifications are grouped, and the actors carrying `message` sit two levels below `NotificationMessageGroup`. The container-level fix accepted in round 3 would have put `openmenu` on the group, which matches none of the `.openmenu.message` compound rules, while still showing a class to any probe: a passing test over dead theming. Fix re-specified to resolve by style class instead of by tree position. Separately, the four group classes GNOME 49+ added have no rules in `stylesheets.js` at all; the owner ruled that out of scope for this ticket, documented and ticketed on its own. Lesson recorded plainly: this area was described from source reading three times and got it wrong twice; the live tree is the only authority |
 | 2026-10-22 | 4 | Harness prototyped before writing the plan, to avoid prescribing an unverified test | Three corrections. The accepted Defect 3 fix `section._list ?? section` was **wrong**: reading `MessageView._addMessageAtIndex` showed the section level disappeared, not `_list`, so that expression reached one level too deep and would have themed grandchildren. Fix moved to the container level. The harness gained two mandatory properties found by watching it report success while measuring nothing: `GSETTINGS_BACKEND=keyfile`, without which the extension never enables, and reading state from the Shell rather than the `gnome-extensions` CLI. Compatibility is now established empirically, not only by inspection: the port reaches state `ACTIVE` on 51.1 |
