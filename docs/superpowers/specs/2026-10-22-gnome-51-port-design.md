@@ -54,7 +54,8 @@ modifications are stated. Nothing else constrains this work.
 | Defect 3 fix shape | Resolve the actors to theme **by style class**: collect every descendant of the message list carrying `message`, stop descending at the first match. One expression for 45 through 51, independent of how deeply the Shell nests them | A `gnomeVersion >= 49` branch, or resolving by tree position — both were tried on paper and both were wrong, see review log rounds 4 and 5 |
 | Group chrome CSS | Out of scope. The four classes GNOME 49+ added for notification groups get no rules in this ticket; the gap is documented and ticketed separately | Extend `stylesheets.js` here, mixing theming design into a port offered upstream |
 | DateMenu traversal | Keep upstream's index walking, wrap it in `try/catch` | Rewrite it to search by `style_class`; removes the defect class rather than the instance, but rewrites working code and is hard to land upstream |
-| Lint reach | `npm run lint` over the whole repository, with the initial error count recorded in `docs/development/linting.md` as a baseline and a "no new errors" rule | Lint only touched files: greener, but does not describe the real state |
+| Lint reach | `npm run lint` over `openbar@neuromorph` plus the JavaScript this fork wrote itself (`eslint.config.js`, `tools/harness/`), with the per-file counts recorded in `docs/development/linting.md` as a baseline and a "no new findings" rule. Upstream's code carries a baseline; our own is held at zero. The vendored configuration under `tools/eslint-config-gnome/` is excluded, since linting a byte-identical copy measures someone else's repository | Lint only touched files: greener, but does not describe the real state. Or lint literally everything, which would report findings against vendored upstream code nobody here may change |
+| Linter provenance | Vendor `eslint-config-gnome` under `tools/eslint-config-gnome/` at the commit gnome-shell 51.1 pins, with a `VENDORED.md` recording provenance and resync | Declare it as a git dependency on gitlab.gnome.org, which is how gnome-shell itself consumes it — refused by npm 12, see review log round 7 |
 | Worktree location | `.claude/worktrees/<branch>`, added to `.gitignore` | A path outside the repository |
 | Upstream contribution | Two separate pull requests to `neuromorph/openbar`: the v49 fix first, GNOME 51 support second | One all-or-nothing pull request |
 | Branch | `feat/main/gnome-51-support` | — |
@@ -256,6 +257,15 @@ things are asserted:
    which sheets are loaded, so the absence of that log line is the available
    evidence, not proof the sheet took effect.
 
+All three are exit-code assertions. Only the first was enforced until the
+whole-branch review: the other two were printed for a human to read, so a throw
+inside a signal handler or a timeout callback — which GJS logs and swallows
+without changing extension state — passed silently. The harness also asserts
+that an `--eval` probe was actually evaluated, and, with `--eval-contains`, that
+its result holds an expected string; `org.gnome.Shell.Eval` answers
+`(false, '')` when it refuses and `(false, '<error>')` when the expression
+throws, and both used to exit 0.
+
 Two properties of the harness are load-bearing, and both were found by watching
 the harness report success while measuring nothing:
 
@@ -324,6 +334,17 @@ ships with the mutation that breaks it:
   `openmenu` on *any* actor is not enough: it must be asserted on the actor that
   also carries `message`, or the compound selector is not what was tested.
 
+- **The probe itself**: `--eval-contains openmenu` over that probe must exit 0,
+  and must exit non-zero once `trackMessageAdditions` is mutated out, which
+  leaves `classes` reading `["message"]`. Until the review this control passed
+  either way, because the probe's result was printed rather than asserted.
+
+- **The calendar pane**: a probe walking the pane children, their children and
+  their grandchildren — the reach of `applyBoxStyles` — must find no actor
+  without `openmenu`, and must find 19 of them once the `applyBoxStyles` call is
+  mutated out. This is the only assertion covering the refactor that replaced
+  three nested `forEach` levels with `applyBoxStyles`.
+
 The verification procedure is written to `docs/development/testing.md` so it is
 reproducible without this document.
 
@@ -336,19 +357,25 @@ reproducible without this document.
 - `docs/development/linting.md` — how to run the linter and the baseline count
 - `CLAUDE.md` — licence constraint, upstream code pending migration, how to test
 - `eslint.config.js`, `package.json` with `npm run lint`, using
-  `eslint-config-gnome` as a git dependency from
-  `gitlab.gnome.org/World/javascript/eslint-config-gnome`; it is not published
-  on npm, which is how gnome-shell 51.1 itself consumes it
+  `eslint-config-gnome` vendored under `tools/eslint-config-gnome/` at the
+  commit gnome-shell 51.1 pins. It is not published on npm, and npm 12 refuses
+  git dependencies and remote tarballs by default, so depending on it directly
+  — as gnome-shell does — would mean relaxing that default for everyone who
+  clones. `tools/eslint-config-gnome/VENDORED.md` records provenance and resync
 - `.gitignore` gains `.claude/`
 - Two pull requests proposed to `neuromorph/openbar`
 
 ## Review log
+
+Sorted by round, ascending; the dates rise with it, and a round's number is
+the order it happened in.
 
 | Date | Round | Trigger | Outcome |
 |---|---|---|---|
 | 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
 | 2026-10-22 | 2 | Self-review before handing the spec over | Two over-claims corrected: `St.Theme` exposes no way to read back loaded sheets, so assertion 3 rests on the absence of the extension's own error log; and the Defect 3 probe would pass vacuously in a headless session with no notifications, so it now raises one and asserts a message actor exists first |
 | 2026-10-22 | 3 | Spec reviewed in Plannotator | All six decisions in "Decisions to confirm" accepted as proposed, no changes requested. Table kept as the record of what was weighed |
-| 2026-10-23 | 6 | Task 8 flagged that the Implementation section still described the superseded fix | Two stale claims the round 5 correction missed, both introduced by the controller and both found by an implementer rather than by review: Defect 3 was still written as `section._list ?? section`, and the extracted functions were named `themeMessageList`/`themeClearButton`, which match no method in the tree. Corrected to the by-style-class resolution and to the real method names. The lesson is narrower than round 5 and worth keeping: correcting a decision in one section of a document does not correct the sections that restate it |
-| 2026-10-23 | 5 | Probed the live Shell 51.1 actor tree before dispatching the Defect 3 fix | The round 4 correction was **also wrong**, and in the same direction: it moved the target up one level inside a deeper mistake. The real shape has two levels round 4 did not know about — notifications are grouped, and the actors carrying `message` sit two levels below `NotificationMessageGroup`. The container-level fix accepted in round 3 would have put `openmenu` on the group, which matches none of the `.openmenu.message` compound rules, while still showing a class to any probe: a passing test over dead theming. Fix re-specified to resolve by style class instead of by tree position. Separately, the four group classes GNOME 49+ added have no rules in `stylesheets.js` at all; the owner ruled that out of scope for this ticket, documented and ticketed on its own. Lesson recorded plainly: this area was described from source reading three times and got it wrong twice; the live tree is the only authority |
 | 2026-10-22 | 4 | Harness prototyped before writing the plan, to avoid prescribing an unverified test | Three corrections. The accepted Defect 3 fix `section._list ?? section` was **wrong**: reading `MessageView._addMessageAtIndex` showed the section level disappeared, not `_list`, so that expression reached one level too deep and would have themed grandchildren. Fix moved to the container level. The harness gained two mandatory properties found by watching it report success while measuring nothing: `GSETTINGS_BACKEND=keyfile`, without which the extension never enables, and reading state from the Shell rather than the `gnome-extensions` CLI. Compatibility is now established empirically, not only by inspection: the port reaches state `ACTIVE` on 51.1 |
+| 2026-10-23 | 5 | Probed the live Shell 51.1 actor tree before dispatching the Defect 3 fix | The round 4 correction was **also wrong**, and in the same direction: it moved the target up one level inside a deeper mistake. The real shape has two levels round 4 did not know about — notifications are grouped, and the actors carrying `message` sit two levels below `NotificationMessageGroup`. The container-level fix accepted in round 3 would have put `openmenu` on the group, which matches none of the `.openmenu.message` compound rules, while still showing a class to any probe: a passing test over dead theming. Fix re-specified to resolve by style class instead of by tree position. Separately, the four group classes GNOME 49+ added have no rules in `stylesheets.js` at all; the owner ruled that out of scope for this ticket, documented and ticketed on its own. Lesson recorded plainly: this area was described from source reading three times and got it wrong twice; the live tree is the only authority |
+| 2026-10-23 | 6 | Task 8 flagged that the Implementation section still described the superseded fix | Two stale claims the round 5 correction missed, both introduced by the controller and both found by an implementer rather than by review: Defect 3 was still written as `section._list ?? section`, and the extracted functions were named `themeMessageList`/`themeClearButton`, which match no method in the tree. Corrected to the by-style-class resolution and to the real method names. The lesson is narrower than round 5 and worth keeping: correcting a decision in one section of a document does not correct the sections that restate it |
+| 2026-10-23 | 7 | Task 7 attempted; `npm install` refused the git dependency this document specified | The linter configuration is vendored instead. npm 12 refuses git dependencies (`EALLOWGIT`) and remote tarballs (`EALLOWREMOTE`) by default, and `eslint-config-gnome` is not published on npm, so the specified dependency could not be installed without relaxing an npm security default for everyone who clones the repository. The owner chose vendoring the exact commit gnome-shell 51.1 pins, with a `VENDORED.md` recording provenance, licence and how to resync. The plan was revised the same day; this document was not, so its Deliverables still named a git dependency and its Decisions table still recorded a lint reach of "the whole repository" that `package.json` never had, with no row for the vendoring decision at all. All three corrected here, three commits late; the table now holds seven rows where round 3 accepted six. This is round 6's lesson again, one document further out: correcting a decision where it was taken does not correct the documents that restate it |
