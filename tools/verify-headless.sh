@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 set -eu
 
 UUID=openbar@neuromorph
@@ -8,6 +9,7 @@ REPO=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 widen_metadata=yes
 mutate_expr=''
 eval_js=''
+eval_expect=''
 
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -18,6 +20,10 @@ while [ $# -gt 0 ]; do
 		;;
 	--eval)
 		eval_js=$2
+		shift
+		;;
+	--eval-contains)
+		eval_expect=$2
 		shift
 		;;
 	*)
@@ -56,10 +62,11 @@ install_payload() {
 	cp -r "$REPO/tools/harness/$HELPER" "$XDG_DATA_HOME/gnome-shell/extensions/$HELPER"
 }
 
-widen_scratch_metadata() {
-	[ "$widen_metadata" = yes ] || return 0
-	metadata="$XDG_DATA_HOME/gnome-shell/extensions/$UUID/metadata.json"
-	running_major=$(gnome-shell --version | sed 's/[^0-9]*\([0-9]*\).*/\1/')
+running_shell_major() {
+	gnome-shell --version | sed 's/[^0-9]*\([0-9]*\).*/\1/'
+}
+
+declare_running_shell() {
 	python3 -I -c '
 import json, sys
 path, major = sys.argv[1], sys.argv[2]
@@ -69,7 +76,14 @@ if major not in meta["shell-version"]:
     meta["shell-version"].append(major)
 with open(path, "w") as handle:
     json.dump(meta, handle, indent=2)
-' "$metadata" "$running_major"
+' "$1" "$(running_shell_major)"
+}
+
+widen_scratch_metadata() {
+	scratch_extensions="$XDG_DATA_HOME/gnome-shell/extensions"
+	[ "$widen_metadata" = no ] ||
+		declare_running_shell "$scratch_extensions/$UUID/metadata.json"
+	declare_running_shell "$scratch_extensions/$HELPER/metadata.json"
 }
 
 mutate_scratch_source() {
@@ -97,6 +111,11 @@ shell_name_has_owner() {
 refuse_shared_session_bus() {
 	[ "$(shell_name_has_owner)" = '(false,)' ] ||
 		fail 'org.gnome.Shell already has an owner: run through dbus-run-session, not on a live session bus'
+}
+
+refuse_expectation_without_probe() {
+	[ -z "$eval_expect" ] || [ -n "$eval_js" ] ||
+		fail '--eval-contains needs --eval: there is no result to search'
 }
 
 start_shell() {
@@ -144,24 +163,82 @@ print_extension_log_lines() {
 	grep 'Openbar:' "$work/shell.log" | head -20 || true
 }
 
-report() {
+evaluate_probe() {
+	[ -n "$eval_js" ] || return 0
+	shell_eval "$eval_js"
+}
+
+scratch_stylesheet_state() {
+	[ -f "$XDG_RUNTIME_DIR/io.github.neuromorph.openbar/stylesheet.css" ] &&
+		echo generated || echo absent
+}
+
+stylesheet_load_error_count() {
+	grep -c 'Openbar: Error loading stylesheet' "$work/shell.log" || true
+}
+
+extension_js_error_count() {
+	grep -A 12 'JS ERROR' "$work/shell.log" | grep -c "$UUID" || true
+}
+
+read_measurements() {
 	state=$(extension_field state)
 	error=$(extension_field error)
+	eval_result=$(evaluate_probe)
+	stylesheet_state=$(scratch_stylesheet_state)
+	load_errors=$(stylesheet_load_error_count)
+	js_errors=$(extension_js_error_count)
+}
+
+print_measurements() {
 	echo "shell: $(shell_version)"
 	echo "state: $state"
 	echo "error: $error"
-	[ "$state" != '6.0' ] ||
-		fail 'state INITIALIZED: the extension was never enabled, nothing was measured'
-	[ -n "$eval_js" ] && echo "eval: $(shell_eval "$eval_js")"
-	stylesheet="$XDG_RUNTIME_DIR/io.github.neuromorph.openbar/stylesheet.css"
-	[ -f "$stylesheet" ] && echo "stylesheet: generated" || echo "stylesheet: absent"
-	grep -c 'Openbar: Error loading stylesheet' "$work/shell.log" |
-		sed 's/^/stylesheet load errors: /'
+	[ -z "$eval_js" ] || echo "eval: $eval_result"
+	echo "stylesheet: $stylesheet_state"
+	echo "stylesheet load errors: $load_errors"
+	echo "extension JS errors: $js_errors"
 	print_js_error_excerpt
 	print_extension_log_lines
+}
+
+assert_probe_was_evaluated() {
+	[ -n "$eval_js" ] || return 0
+	[ "$eval_result" != "(false, '')" ] ||
+		fail 'Eval was refused: the unsafe-mode helper did not load, so the probe measured nothing'
+	[ "${eval_result#"(false,"}" = "$eval_result" ] ||
+		fail "the probe expression threw: $eval_result"
+}
+
+assert_probe_result_contains_expectation() {
+	[ -n "$eval_expect" ] || return 0
+	case $eval_result in
+	*"$eval_expect"*) return 0 ;;
+	esac
+	fail "the eval result does not contain '$eval_expect': $eval_result"
+}
+
+assert_measurements() {
+	[ "$state" != '6.0' ] ||
+		fail 'state INITIALIZED: the extension was never enabled, nothing was measured'
+	assert_probe_was_evaluated
+	assert_probe_result_contains_expectation
+	[ "$stylesheet_state" = generated ] ||
+		fail 'stylesheet.css was never generated'
+	[ "$load_errors" = 0 ] ||
+		fail "the extension logged $load_errors stylesheet load error lines"
+	[ "$js_errors" = 0 ] ||
+		fail "the Shell logged a JS ERROR naming $UUID"
 	[ "$state" = '1.0' ] && [ "$error" = "''" ]
 }
 
+report() {
+	read_measurements
+	print_measurements
+	assert_measurements
+}
+
+refuse_expectation_without_probe
 prepare_session_dirs
 install_payload
 widen_scratch_metadata
