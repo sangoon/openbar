@@ -39,7 +39,9 @@ Keep the scope to compatibility. These are known and deliberately left alone:
   (`message-notification-group`, `message-group-header`, `message-group-title`,
   `message-collapse-button`) has no rule in `stylesheets.js`. Notifications
   theme correctly; the group header and collapse button do not. This is theming
-  design, tracked separately, and not folded into a port offered upstream.
+  design, tracked as Vikunja ticket #2
+  (<https://tasks.sangoon.fr/tasks/177>), and not folded into a port offered
+  upstream.
 - The six GTK widgets deprecated since 4.10 in `prefs.js` still work in GTK
   4.24 and will break at GTK 5. Replacing them is an interface rewrite.
 - The sources keep upstream's comments and file sizes. Only code the port
@@ -69,8 +71,11 @@ baseline, not zero findings (`docs/development/linting.md`).
 
 On GNOME Shell 51.1 the extension reaches state 1 `ACTIVE` with an empty error
 and a generated stylesheet, using the committed `metadata.json`. Upstream's
-`main` reaches `ERROR` on every Shell version, and with the declaration
-unwidened it is refused as `OUT_OF_DATE`.
+`main` was measured reaching `ERROR` on 51.1, and refused as `OUT_OF_DATE` with
+the declaration unwidened. That it reaches `ERROR` on every other Shell version
+is an inference, not a measurement: `clearBtn` is read outside both block scopes
+that declare it, and the branch that reads it is not version-gated, so the
+`ReferenceError` cannot depend on the Shell.
 
 The fork diverges from upstream until the pull requests land, and carries the
 port forward at each Shell release. The harness makes that cheap: widen the
@@ -83,9 +88,11 @@ grouped per source, the `message` actors two levels below a
 `org.gnome.Shell.Eval`. Compatibility by inspection would have missed the three
 silent defects too. The live tree, not the source, is the authority.
 
-What inspection did establish, and the harness confirmed: no GI symbol, Shell
-module export, private member, theme class name or GSettings key the extension
-uses changed between 49 and 51.
+What inspection established, and the harness corroborates only indirectly by
+the extension reaching `ACTIVE`: no GI symbol, Shell module export, private
+member, theme class name or GSettings key the extension uses changed between 49
+and 51. The harness cannot name a symbol; it can only say that nothing the
+extension touched on startup was missing.
 
 The linter baseline (2729 findings) was produced under ESLint 10, which enables
 one rule, `no-useless-assignment` (10 findings), that upstream's declared

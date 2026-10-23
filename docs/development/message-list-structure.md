@@ -64,7 +64,8 @@ anywhere in `stylesheets.js`.
 So notifications theme correctly, and the header and collapse button of each
 group do not. Writing rules for them is theming design in a 3878-line generated
 stylesheet, which is a different kind of work from a compatibility port; it is
-tracked as its own ticket rather than folded into this one.
+tracked as Vikunja ticket #2 (<https://tasks.sangoon.fr/tasks/177>) rather than
+folded into this one.
 
 ## Why the traversal is guarded
 
@@ -78,6 +79,13 @@ version.
 The guard is verified by mutation, not by inspection: `verify-headless.sh
 --mutate` forces a bad index and the extension must stay `ACTIVE` with the
 failure logged. Without the guard the same mutation must produce `ERROR`.
+
+One guard covers both panes, so a drift in the message pane also costs the
+calendar pane its theming even though nothing about the calendar changed.
+Splitting it into one guard per pane was considered and deferred to the next
+time `themeDateMenu()` is touched: the finer granularity buys partial theming in
+a case that has not yet occurred, and the port's own rule is to change only what
+it must.
 
 ## Shape of the date menu, as the traversal reads it
 

@@ -14,14 +14,17 @@ npm, and npm 12 refuses git dependencies (`EALLOWGIT`) and remote tarballs
 (`EALLOWREMOTE`) by default. Depending on it would have meant relaxing that
 default for the whole repository, including for anyone who clones it.
 
-Only `src/`, `package.json` (its `src/index.js` reads it at load time), `COPYING` and `REUSE.toml` are copied. Nothing here is modified; if
-it ever needs a local change, record the change in this file.
+Only `src/`, `package.json` (its `src/index.js` reads it at load time),
+`COPYING` and `REUSE.toml` are copied. Nothing here is modified; if it ever
+needs a local change, record the change in this file.
 
 ## Resyncing
 
-Fetch a newer commit the same way, replace `src/`, and update the commit and
-date above. Re-run `npm run lint` and update the baseline in
-`docs/development/linting.md` in the same commit, since the counts will move.
+Fetch a newer commit the same way, replace both `src/` and `package.json` —
+`src/index.js` reads the version out of `package.json` at load time, so a stale
+one misreports it — and update the commit and date above. Re-run
+`npm run lint` and update the baseline in `docs/development/linting.md` in the
+same commit, since the counts will move.
 
 ## Dependency versions: declared upstream versus resolved here
 

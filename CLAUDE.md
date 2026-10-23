@@ -40,7 +40,9 @@ a notification.
 
 Known gap: GNOME 49+ group chrome (`message-notification-group`,
 `message-group-header`, `message-group-title`, `message-collapse-button`) is not
-themed. It is tracked separately; do not fold it into a compatibility change.
+themed. It is tracked as Vikunja ticket #2
+(<https://tasks.sangoon.fr/tasks/177>); do not fold it into a compatibility
+change.
 
 ## Code conventions
 
