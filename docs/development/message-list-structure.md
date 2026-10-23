@@ -65,3 +65,36 @@ So notifications theme correctly, and the header and collapse button of each
 group do not. Writing rules for them is theming design in a 3878-line generated
 stylesheet, which is a different kind of work from a compatibility port; it is
 tracked as its own ticket rather than folded into this one.
+
+## Why the traversal is guarded
+
+`themeDateMenu()` wraps the walk in a `try`/`catch` that logs and continues.
+The walk addresses children by index, so any change in the date menu's actor
+hierarchy raises. `applyMenuStyles()` is called from `enable()` with no handler
+of its own, so before the guard a single wrong index put the whole extension in
+`ERROR` — which is exactly what the `clearBtn` defect did on every Shell
+version.
+
+The guard is verified by mutation, not by inspection: `verify-headless.sh
+--mutate` forces a bad index and the extension must stay `ACTIVE` with the
+failure logged. Without the guard the same mutation must produce `ERROR`.
+
+## Shape of the date menu, as the traversal reads it
+
+The walk goes menu box, calendar area, then two panes: the message pane on the
+left and the calendar pane on the right.
+
+- Message pane: child 0 is the "No Notifications" placeholder, child 1 the box
+  holding the scrolled section list and the controls row.
+- Controls row: before GNOME 49 the Do Not Disturb button is child 1 (its
+  toggle switch is its child 0) and the Clear button child 2; from 49 the Clear
+  button is child 0.
+- Calendar pane: every child is themed with `applyBoxStyles()`, which covers
+  the child, its children and its grandchildren, as the former hand-written
+  nested loops did. Only the `Calendar` child also gets its day grid styled,
+  once immediately and once after 250 ms, because the grid is rebuilt after
+  the menu opens.
+
+The harness prints only `JS ERROR` excerpts. A guarded failure is a plain log
+line, `Openbar: Could not theme the date menu`, which is not in that excerpt;
+confirm it from the Shell log of the scratch session.

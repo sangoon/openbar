@@ -353,6 +353,55 @@ export default class Openbar extends Extension {
         this.msgListIds = [];
     }
 
+    themeDateMenu(dateMenuButton, add) {
+        try {
+            const calendarArea = dateMenuButton.menu.box.get_child_at_index(0);
+            const panes = calendarArea.get_child_at_index(0);
+            this.themeMessagePane(panes.get_child_at_index(0), add);
+            this.themeCalendarPane(panes.get_child_at_index(1), add);
+        }
+        catch (e) {
+            console.log('Openbar: Could not theme the date menu: ', e);
+        }
+    }
+
+    themeMessagePane(messagePane, add) {
+        this.applyMenuClass(messagePane, add);
+        this.applyMenuClass(messagePane.get_child_at_index(0), add);
+
+        const messageBox = messagePane.get_child_at_index(1);
+        this.applySectionStyles(messageBox.get_child_at_index(0).child, add);
+        this.themeMessageControls(messageBox.get_child_at_index(1), add);
+    }
+
+    themeMessageControls(controls, add) {
+        if(this.gnomeVersion < 49) {
+            const dndBtn = controls.get_child_at_index(1);
+            this.applyMenuClass(dndBtn, add);
+            this.applyMenuClass(dndBtn.get_child_at_index(0), add);
+            this.applyMenuClass(controls.get_child_at_index(2), add);
+        }
+        else
+            this.applyMenuClass(controls.get_child_at_index(0), add);
+    }
+
+    themeCalendarPane(calendarPane, add) {
+        calendarPane.get_children().forEach(item => {
+            this.applyBoxStyles(item, add);
+
+            if(item.constructor.name === 'Calendar')
+                this.scheduleCalendarGridStyle(item, add);
+        });
+    }
+
+    scheduleCalendarGridStyle(calendar, add) {
+        this.applyCalendarGridStyle(calendar, add);
+        this.calendarTimeoutId = setTimeout(() => {
+            this.applyCalendarGridStyle(calendar, add);
+            this.calendarTimeoutId = null;
+        }, 250);
+    }
+
     // Go through each panel button's menu to add/remove openmenu class to its children
     applyMenuStyles(panel, add) {
         for(const box of this.panelBoxes) {
@@ -388,61 +437,8 @@ export default class Openbar extends Extension {
                             this.applyBoxStyles(ctxMenu.box, add);
                     }
 
-                    // DateMenu: Notifications (messages and media), DND and Clear buttons
-                    //           Calendar Grid, Events, World Clock, Weather
                     if(btn.child.constructor.name === 'DateMenuButton') {
-                        const bin = btn.child.menu.box.get_child_at_index(0); // CalendarArea
-                        const hbox = bin.get_child_at_index(0); // hbox with left and right sections
-
-                        const msgList = hbox.get_child_at_index(0); // Left Pane/Section with notifications etc
-                        this.applyMenuClass(msgList, add);
-                        const placeholder = msgList.get_child_at_index(0); // placeholder for 'No Notifications'
-                        this.applyMenuClass(placeholder, add);
-                        const msgbox = msgList.get_child_at_index(1);
-                        const msgScroll = msgbox.get_child_at_index(0);
-                        const sectionList = msgScroll.child;
-                        if(add) {
-                            this._connections.connect(sectionList, this.addedSignal, (container, actor) => {
-                                // console.log('section added: ', actor.constructor.name);
-                                this.applySectionStyles(sectionList, add);
-                            });
-                        }
-                        else
-                            this._connections?.disconnect(sectionList, this.addedSignal);
-                        this.applySectionStyles(sectionList, add);
-
-                        const msgHbox = msgbox.get_child_at_index(1); // hbox at botton for dnd and clear buttons
-                        let clearBtn;
-                        if(this.gnomeVersion < 49) {
-                            const dndBtn = msgHbox.get_child_at_index(1);
-                            this.applyMenuClass(dndBtn, add);
-                            const toggleSwitch = dndBtn.get_child_at_index(0);
-                            this.applyMenuClass(toggleSwitch, add);
-                            clearBtn = msgHbox.get_child_at_index(2);
-                        }
-                        else {
-                            clearBtn = msgHbox.get_child_at_index(0);
-                        }
-                        this.applyMenuClass(clearBtn, add);
-
-                        const vbox = hbox.get_child_at_index(1); // Right Pane/Section vbox for calendar etc
-                        vbox.get_children().forEach(item => {
-                            this.applyMenuClass(item, add);
-                            item.get_children().forEach(child => {
-                                this.applyMenuClass(child, add);
-                                child.get_children().forEach(subch => {
-                                    this.applyMenuClass(subch, add);
-                                })
-                            });
-
-                            if(item.constructor.name === 'Calendar') {
-                                this.applyCalendarGridStyle(item, add);
-                                this.calendarTimeoutId = setTimeout(() => {
-                                    this.applyCalendarGridStyle(item, add);
-                                    this.calendarTimeoutId = null;
-                                }, 250);
-                            }
-                        });
+                        this.themeDateMenu(btn.child, add);
                     }
 
                 }
