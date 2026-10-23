@@ -361,7 +361,7 @@ export default class Openbar extends Extension {
             this.themeCalendarPane(panes.get_child_at_index(1), add);
         }
         catch (e) {
-            console.log(`Openbar: Could not theme the date menu: ${e} at ${e.stack ?? 'unknown'}`);
+            console.error('Openbar: Could not theme the date menu:', e);
         }
     }
 
