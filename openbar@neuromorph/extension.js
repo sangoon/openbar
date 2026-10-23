@@ -302,26 +302,55 @@ export default class Openbar extends Extension {
         });
     }
 
-    // Add/Remove openmenu class to Notifications and Media message lists
-    // as well as to any other lists added by other extensions
+    messageActors(list) {
+        const collect = actor => actor.has_style_class_name?.('message')
+            ? [actor]
+            : actor.get_children().flatMap(collect);
+
+        return list.get_children().flatMap(collect);
+    }
+
+    messageContainers(list) {
+        const collect = actor => actor.has_style_class_name?.('message')
+            ? []
+            : [actor, ...actor.get_children().flatMap(collect)];
+
+        return collect(list);
+    }
+
     applySectionStyles(list, add) {
-        list.get_children().forEach((section, idx) => {
-            let msgList = section._list;
-            if(add && !this.msgListIds[idx]) {
-                this.msgListIds[idx] = msgList?.connect(this.addedSignal, (container, actor) => {
-                    this.applyMenuClass(actor.child, add);
-                });
-                this.msgLists[idx] = msgList;
-            }
-            else if(!add && this.msgListIds[idx]) {
-                msgList?.disconnect(this.msgListIds[idx]);
-                this.msgListIds[idx] = null;
-                this.msgLists[idx] = null;
-            }
-            msgList?.get_children().forEach(msg => {
-                this.applyMenuClass(msg.child, add);
-            });
+        this.trackMessageAdditions(list, add);
+
+        this.messageActors(list).forEach(message => {
+            this.applyMenuClass(message, add);
         });
+    }
+
+    trackMessageAdditions(list, add) {
+        if(!add) {
+            this.untrackMessageAdditions();
+            return;
+        }
+
+        this.messageContainers(list).forEach(container => {
+            if(this.msgLists.includes(container))
+                return;
+
+            this.msgLists.push(container);
+            this.msgListIds.push(container.connect(this.addedSignal, () => {
+                this.applySectionStyles(list, add);
+            }));
+        });
+    }
+
+    untrackMessageAdditions() {
+        this.msgLists.forEach((container, idx) => {
+            if(this.msgListIds[idx])
+                container.disconnect(this.msgListIds[idx]);
+        });
+
+        this.msgLists = [];
+        this.msgListIds = [];
     }
 
     // Go through each panel button's menu to add/remove openmenu class to its children
