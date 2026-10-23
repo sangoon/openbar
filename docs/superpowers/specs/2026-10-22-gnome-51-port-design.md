@@ -51,7 +51,8 @@ modifications are stated. Nothing else constrains this work.
 
 | Decision | Chosen | Alternative considered |
 |---|---|---|
-| Defect 3 fix shape | Capability detection on the *container* level: collect `section._list` across children, and fall back to the list itself when none has one. Works on 45 through 51 with no version gate | A `gnomeVersion >= 49` branch, more explicit but one more branch to revisit every release |
+| Defect 3 fix shape | Resolve the actors to theme **by style class**: collect every descendant of the message list carrying `message`, stop descending at the first match. One expression for 45 through 51, independent of how deeply the Shell nests them | A `gnomeVersion >= 49` branch, or resolving by tree position — both were tried on paper and both were wrong, see review log rounds 4 and 5 |
+| Group chrome CSS | Out of scope. The four classes GNOME 49+ added for notification groups get no rules in this ticket; the gap is documented and ticketed separately | Extend `stylesheets.js` here, mixing theming design into a port offered upstream |
 | DateMenu traversal | Keep upstream's index walking, wrap it in `try/catch` | Rewrite it to search by `style_class`; removes the defect class rather than the instance, but rewrites working code and is hard to land upstream |
 | Lint reach | `npm run lint` over the whole repository, with the initial error count recorded in `docs/development/linting.md` as a baseline and a "no new errors" rule | Lint only touched files: greener, but does not describe the real state |
 | Worktree location | `.claude/worktrees/<branch>`, added to `.gitignore` | A path outside the repository |
@@ -125,22 +126,57 @@ children are bins wrapping a message:
 
 ```
 up to 48:  sectionList -> section -> section._list -> St.Bin -> .child = Message
-since 49:  MessageView --------------------------> St.Bin -> .child = Message
+
+since 49:  MessageView                         message-view
+             +- St.Bin
+                  +- NotificationMessageGroup  message-notification-group
+                       +- <container>
+                       |    +- NotificationMessage   message
+                       +- St.BoxLayout         message-group-header
+                            +- St.Label        message-group-title
+                            +- St.Button       message-collapse-button
 ```
 
-`MessageView._addMessageAtIndex` (`messageList.js:1572-1596`) wraps each message
-in an `St.Bin` and adds it directly to the view. What vanished is not `_list`
-under each section — it is the section level itself. `MessageView` now plays
-exactly the role `section._list` used to play, so the fix belongs at the
-contract of `applySectionStyles`, not inside its loop: the argument *is* the
-message container when no child exposes `_list`.
+The 49+ shape above was read off a live Shell 51.1 through `Eval`, not inferred
+from the sources. Two earlier readings of this area were wrong; see the review
+log, rounds 4 and 5.
 
-`MessageView` also holds a non-message `_overlay` child (a `Clutter.Actor` with
-no `child` property); `applyMenuClass` already returns early on a falsy
-argument, so it needs no special case.
+Notifications are now grouped per source. The actors carrying the `message`
+style class sit two levels below the group, and the group itself carries
+`message-notification-group`.
+
+This matters because of how the generated stylesheet is written. Every rule is
+`.openmenu.message`, a compound selector (`stylesheets.js:2463` and following),
+so `openmenu` has to land **on the same actor** that carries `message`. Putting
+it on the group matches nothing — while any probe would still report a class and
+read as a pass.
+
+The fix therefore resolves message actors **by style class rather than by tree
+position**: collect, from the message list, every descendant carrying `message`,
+and stop descending once one is found. That covers 45 through 51 in one
+expression, with no version gate and no dependency on how deeply the Shell
+nests them next.
+
+`MessageView` also holds a non-message `_overlay` child, a `Clutter.Actor`,
+which has no `has_style_class_name` method; the collector must guard for that
+rather than assume every actor is an `St.Widget`.
 
 The existing optional chaining keeps the current code from throwing, so the
 failure is silent: notifications never receive the `openmenu` class.
+
+### Out of scope, and why it is recorded here
+
+GNOME 49+ also introduced `message-notification-group`, `message-group-header`,
+`message-group-title` and `message-collapse-button`. None of the four appears
+anywhere in `stylesheets.js`. So once `openmenu` reaches the `message` actors,
+the notifications themselves theme correctly but the group's header and collapse
+button stay unthemed.
+
+Writing rules for them is theming design in a 3878-line generated stylesheet,
+with no reference to match against — a different kind of work from a
+compatibility port, and not something to fold into a pull request offered
+upstream as a port. It is recorded in `docs/development/message-list-structure.md`
+and carried as its own ticket.
 
 ### Known debt left out of scope
 
@@ -267,9 +303,18 @@ ships with the mutation that breaks it:
   `ERROR`. This proves the guard does something.
 - **Defect 3**: a headless session has no notifications, so a probe that finds
   no message actor would pass vacuously. The probe therefore raises a
-  notification first, asserts that at least one message actor exists, and only
-  then asserts the `openmenu` class on it. It must fail against `main` and pass
-  after the fix.
+  notification first, asserts that at least one actor carrying the `message`
+  class exists, and only then asserts `openmenu` on that same actor. It must
+  fail against `main` and pass after the fix.
+
+  Two further traps, both found by running the probe rather than reasoning about
+  it. `Main.notify()` builds a notification with `isTransient: true`, which is
+  not a reliable way to put something in the list; the probe constructs a
+  non-transient `MessageTray.Notification` through a dynamic
+  `import('resource:///org/gnome/shell/ui/messageTray.js')` inside the evaluated
+  expression, which works because `Eval` awaits its result. And asserting
+  `openmenu` on *any* actor is not enough: it must be asserted on the actor that
+  also carries `message`, or the compound selector is not what was tested.
 
 The verification procedure is written to `docs/development/testing.md` so it is
 reproducible without this document.
@@ -296,4 +341,5 @@ reproducible without this document.
 | 2026-10-22 | 1 | Initial brainstorming: clone, licence check, compatibility assessment | Scope set to the port alone; fork maintained with upstream pull requests offered; approach A (resync commit then port commit) with the `try/catch` borrowed from approach C; tooling bootstrap limited to docs, local `CLAUDE.md` and a linter |
 | 2026-10-22 | 2 | Self-review before handing the spec over | Two over-claims corrected: `St.Theme` exposes no way to read back loaded sheets, so assertion 3 rests on the absence of the extension's own error log; and the Defect 3 probe would pass vacuously in a headless session with no notifications, so it now raises one and asserts a message actor exists first |
 | 2026-10-22 | 3 | Spec reviewed in Plannotator | All six decisions in "Decisions to confirm" accepted as proposed, no changes requested. Table kept as the record of what was weighed |
+| 2026-10-23 | 5 | Probed the live Shell 51.1 actor tree before dispatching the Defect 3 fix | The round 4 correction was **also wrong**, and in the same direction: it moved the target up one level inside a deeper mistake. The real shape has two levels round 4 did not know about — notifications are grouped, and the actors carrying `message` sit two levels below `NotificationMessageGroup`. The container-level fix accepted in round 3 would have put `openmenu` on the group, which matches none of the `.openmenu.message` compound rules, while still showing a class to any probe: a passing test over dead theming. Fix re-specified to resolve by style class instead of by tree position. Separately, the four group classes GNOME 49+ added have no rules in `stylesheets.js` at all; the owner ruled that out of scope for this ticket, documented and ticketed on its own. Lesson recorded plainly: this area was described from source reading three times and got it wrong twice; the live tree is the only authority |
 | 2026-10-22 | 4 | Harness prototyped before writing the plan, to avoid prescribing an unverified test | Three corrections. The accepted Defect 3 fix `section._list ?? section` was **wrong**: reading `MessageView._addMessageAtIndex` showed the section level disappeared, not `_list`, so that expression reached one level too deep and would have themed grandchildren. Fix moved to the container level. The harness gained two mandatory properties found by watching it report success while measuring nothing: `GSETTINGS_BACKEND=keyfile`, without which the extension never enables, and reading state from the Shell rather than the `gnome-extensions` CLI. Compatibility is now established empirically, not only by inspection: the port reaches state `ACTIVE` on 51.1 |
