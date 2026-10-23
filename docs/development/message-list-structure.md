@@ -95,6 +95,6 @@ left and the calendar pane on the right.
   once immediately and once after 250 ms, because the grid is rebuilt after
   the menu opens.
 
-The harness prints only `JS ERROR` excerpts. A guarded failure is a plain log
-line, `Openbar: Could not theme the date menu`, which is not in that excerpt;
-confirm it from the Shell log of the scratch session.
+The harness prints every `Openbar:` log line, so a guarded failure shows up as
+`Openbar: Could not theme the date menu` followed by the error and its stack.
+`testing.md` describes what the harness reports.
