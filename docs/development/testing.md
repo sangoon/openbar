@@ -17,6 +17,15 @@ Exit 0 means the Shell reached state 1 `ACTIVE` with an empty error. The harness
 | `--mutate SED_EXPR` | Apply a `sed -i` expression to the scratch `extension.js` before launch. Used to inject a fault and confirm a guard catches it. |
 | `--eval JS` | Evaluate one expression inside the test Shell after the state check and print the result. |
 
+## What it prints
+
+After the state, the harness prints `stylesheet: generated|absent`, the count of
+`Openbar: Error loading stylesheet` lines, a 12-line excerpt after each
+`JS ERROR` (capped at 40 lines, so it can include unrelated Shell lines), and
+every log line starting with `Openbar:` (capped at 20). The last group is how a
+guarded failure shows up: the extension stays `ACTIVE`, so there is no
+`JS ERROR`, only a line such as `Openbar: Could not theme the date menu`.
+
 ## Why it is built this way
 
 Two properties are load-bearing, and both were found by watching an earlier

@@ -140,6 +140,10 @@ print_js_error_excerpt() {
 	grep -A 12 'JS ERROR' "$work/shell.log" | head -40 || true
 }
 
+print_extension_log_lines() {
+	grep 'Openbar:' "$work/shell.log" | head -20 || true
+}
+
 report() {
 	state=$(extension_field state)
 	error=$(extension_field error)
@@ -154,6 +158,7 @@ report() {
 	grep -c 'Openbar: Error loading stylesheet' "$work/shell.log" |
 		sed 's/^/stylesheet load errors: /'
 	print_js_error_excerpt
+	print_extension_log_lines
 	[ "$state" = '1.0' ] && [ "$error" = "''" ]
 }
 
