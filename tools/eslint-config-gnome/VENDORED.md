@@ -22,3 +22,18 @@ it ever needs a local change, record the change in this file.
 Fetch a newer commit the same way, replace `src/`, and update the commit and
 date above. Re-run `npm run lint` and update the baseline in
 `docs/development/linting.md` in the same commit, since the counts will move.
+
+## Dependency versions: declared upstream versus resolved here
+
+Upstream's `package.json` (vendored beside `src/`) declares `@eslint/js ^9.28.0`,
+`@eslint/config-helpers ^0.2.2` and `eslint-plugin-jsdoc ^48.11.0`, which implies
+ESLint 9. This repository resolves newer majors: `eslint ^10.13.0`,
+`@eslint/js ^10.0.1`, `@eslint/config-helpers ^0.5.0` and
+`eslint-plugin-jsdoc ^62.0.0` (exact versions in `package-lock.json`).
+
+The baseline in `docs/development/linting.md` therefore comes from ESLint 10, not
+from the versions upstream declares. Measured against the declared ranges
+(`eslint 9.39.5`, `@eslint/js 9.39.5`, `config-helpers 0.2.3`, `jsdoc 48.11.0`)
+the total is 2719 instead of 2729. The only rule that differs is
+`no-useless-assignment`, which ESLint 10 adds to `js/recommended` and which
+reports 10 findings here.
