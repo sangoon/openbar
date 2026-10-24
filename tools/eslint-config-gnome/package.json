@@ -1,0 +1,14 @@
+{
+  "name": "eslint-config-gnome",
+  "version": "1.0.0",
+  "description": "Recommended ESLint config for GNOME",
+  "main": "src/index.js",
+  "type": "module",
+  "license": "MIT OR LGPL-2.1-or-later",
+  "private": true,
+  "dependencies": {
+    "@eslint/config-helpers": "^0.2.2",
+    "@eslint/js": "^9.28.0",
+    "eslint-plugin-jsdoc": "^48.11.0"
+  }
+}

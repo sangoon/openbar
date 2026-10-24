@@ -1,0 +1,6 @@
+{
+  "uuid": "unsafemode@local",
+  "name": "Open Bar test harness unsafe mode",
+  "description": "Enables org.gnome.Shell.Eval for the headless verification harness. Never installed outside the harness scratch directory.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51", "52"]
+}

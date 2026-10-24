@@ -1,0 +1,17 @@
+{
+  "name": "openbar-dev",
+  "version": "1.0.0",
+  "description": "Development tooling for the Open Bar GNOME Shell extension.",
+  "license": "GPL-2.0-or-later",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint openbar@neuromorph eslint.config.js tools/harness"
+  },
+  "devDependencies": {
+    "@eslint/config-helpers": "^0.5.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-jsdoc": "^62.0.0"
+  }
+}
